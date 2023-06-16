@@ -28,3 +28,6 @@ def generate():
     decoded_output = tokenizer.decode(output[0],skip_special_tokens=False)
 
     return jsonify({"text":decoded_output})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0',port=5000)
