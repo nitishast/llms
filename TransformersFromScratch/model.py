@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import math
 ###3.4EmbeddingsandSoftmax(pg 5)
-class InputEmbeddings(nn.module):
+class InputEmbeddings(nn.Module):
     """
     This class represents the input embeddings layer. It takes two arguments: d_model for the model dimension and vocab_size for the size of the vocabulary. 
     It initializes an embedding layer (self.embeddings) using nn.Embedding with the specified vocab_size and d_model.
@@ -204,7 +204,7 @@ class EncoderBlock(nn.Module):
     """
 
     def __init__(self, self_attention_block: MultiHeadAttentionBlock, feed_forward_block:FeedForwardBlock, dropout:float) -> None:
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.self_attention_block = self_attention_block
         self.feed_forward_block = feed_forward_block
         self.residual_connections = nn.ModuleList([ResidualConnetion(dropout) for _ in range(2)])
@@ -327,7 +327,7 @@ class ProjectionLayer(nn.Module):
         #(batch,seqlen,d_model)--->(batch,seqlen,vocabsize)
         return torch.log_softmax(self.proj(x),dim=1)
     
-class Tansformer(nn.Module):
+class Transformer(nn.Module):
 
     """
     Transformer:
@@ -382,5 +382,60 @@ class Tansformer(nn.Module):
     def project(self,x):
         return self.projection_layer(x)
 
+def build_transformer(src_vocab_size:int,tgt_vocab_size:int, src_seq_len:int, tgt_seq_len:int,d_model:int=512, N:int=6, h: int=8, dropout: float=0.1,d_ff: int=2048):
+    """
+    This code defines a function build_transformer that constructs a Transformer model. It takes parameters such as vocabulary sizes, sequence lengths, and model dimensions.
+    The function creates embedding layers for the source and target inputs, as well as positional encoding layers.
+    It then constructs encoder blocks by creating self-attention and feed-forward blocks. These blocks are wrapped in an encoder class.
+    Similarly, decoder blocks are created with self-attention, cross-attention, and feed-forward blocks. These blocks are wrapped in a decoder class.
+    A projection layer is created to project the model's output dimension.
+    Finally, the function returns the Transformer model with the encoder, decoder, embeddings, positional encodings, and projection layer.
+    """
 
+    
+    ##all the parameters are based on the paper. These are the suggested values in the paper "Attention is all you need"
+    
+    # Create the embedding layer
+    src_embed = InputEmbeddings(d_model,src_vocab_size)
+    tgt_embed = InputEmbeddings(d_model,tgt_vocab_size)
 
+    # Create the Postion Embedding layer
+
+    src_pos = PositionalEncoding(d_model,src_seq_len, dropout)
+    tgt_pos = PositionalEncoding(d_model,tgt_seq_len, dropout)
+
+    # Create Encoder Block
+
+    encoder_blocks = []
+    for _ in range(N):
+        encoder_self_attention_block = MultiHeadAttentionBlock(d_model, h , dropout)
+        feed_forwards_block = FeedForwardBlock(d_model, d_ff, dropout)
+        encoder_block = EncoderBlock(encoder_self_attention_block, feed_forwards_block, dropout)
+        encoder_blocks.append(decoder_block)
+    
+    #Create a Decoder Block
+
+    decoder_blocks = []
+    for _ in range(N):
+        decoder_self_attention_block = MultiHeadAttentionBlock(d_model,h,dropout)
+        decoder_cross_attention_block = MultiHeadAttentionBlock(d_model,h, dropout)
+        feed_forwards_block = FeedForwardBlock(d_model, d_ff, dropout)
+        decoder_block = DecoderBlock(decoder_cross_attention_block, decoder_cross_attention_block, feed_forwards_block, dropout)
+        decoder_blocks.append(decoder_block)
+
+    #create encoder and decoder
+    encoder = Encoder(nn.ModuleList(encoder_blocks))
+    decoder = Decoder(nn.ModuleList(decoder_blocks))
+
+    #Create the projection layer
+    projection_layer = ProjectionLayer(d_model, tgt_vocab_size)
+
+    # Create the transformer
+    transformer = Transformer( encoder, decoder, src_embed, tgt_embed, src_pos,tgt_pos, projection_layer)
+
+    # Initialise the parameters
+    for p in transformer.parameters():
+        if p.dim() > 1:
+            nn.init.xavier_uniform_(p)
+
+    return transformer
