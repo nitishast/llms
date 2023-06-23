@@ -31,40 +31,70 @@ class InputEmbeddings(nn.Module):
     By multiplying the weights by sqrt(dmodel), the scaling effect ensures that the magnitude of the embeddings remains balanced 
     and avoids potential issues that can arise from very large or very small values.
     """
-
 class PositionalEncoding(nn.Module):
 
-    """
-    PositionalEncoding: This class represents the positional encoding layer. It takes three arguments: d_model for the model dimension, seq_len for the length of the input sequence, 
-    and dropout for the dropout rate. 
-    It generates positional encodings based on the sine and cosine functions. The positional encodings are added to the input tensor (x) and passed through a dropout layer.
-    """
-
-    def __init__(self, d_model: int, seq_len: int,dropout: float) -> None:
+    def __init__(self, d_model: int, seq_len: int, dropout: float) -> None:
         super().__init__()
-        self.d_model=d_model
-        self.seq_len=seq_len
-        self.dropout=nn.Dropout(dropout)
+        self.d_model = d_model
+        self.seq_len = seq_len
+        self.dropout = nn.Dropout(dropout)
+        # Create a matrix of shape (seq_len, d_model)
+        pe = torch.zeros(seq_len, d_model)
+        # Create a vector of shape (seq_len)
+        position = torch.arange(0, seq_len, dtype=torch.float).unsqueeze(1) # (seq_len, 1)
+        # Create a vector of shape (d_model)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)) # (d_model / 2)
+        # Apply sine to even indices
+        pe[:, 0::2] = torch.sin(position * div_term) # sin(position * (10000 ** (2i / d_model))
+        # Apply cosine to odd indices
+        pe[:, 1::2] = torch.cos(position * div_term) # cos(position * (10000 ** (2i / d_model))
+        # Add a batch dimension to the positional encoding
+        pe = pe.unsqueeze(0) # (1, seq_len, d_model)
+        # Register the positional encoding as a buffer
+        self.register_buffer('pe', pe)
 
-        #Creating a matrix of shape (seq length ,d_model)
-        pe = torch.zeros(seq_len,d_model)
+    def forward(self, x):
+        x = x + (self.pe[:, :x.shape[1], :]).requires_grad_(False) # (batch, seq_len, d_model)
+        return self.dropout(x)
 
-        #crating a vector that will represent the position of the words inside the sentence
-        #create a vector of shape (sequience length)
-        position = torch.arange(0,seq_len,dtype=torch.float()).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0,d_model,2).float() * (-math.log(10000.0) / d_model))
-        # apply the sin to even postion and cosine to odd positions
-        pe[:,0::2]=torch.sin(position * div_term)
-        pe[:,1::2]=torch.cos(position * div_term)
+# class PositionalEncoding(nn.Module):
 
-        pe =pe.unsqueeze(1) #this will become tnesor of 1,seq_len,d_model
+#     """
+#     PositionalEncoding: This class represents the positional encoding layer. It takes three arguments: d_model for the model dimension, seq_len for the length of the input sequence, 
+#     and dropout for the dropout rate. 
+#     It generates positional encodings based on the sine and cosine functions. The positional encodings are added to the input tensor (x) and passed through a dropout layer.
+#     """
 
-        self.register_buffer('pe', pe) #### when we want to save atnesor along with them mdoel we use this method
+#     def __init__(self, d_model: int, seq_len: int,dropout: float) -> None:
+#         super().__init__()
+#         self.d_model=d_model
+#         self.seq_len=seq_len
+#         self.dropout=nn.Dropout(dropout)
+
+#         #Creating a matrix of shape (seq length ,d_model)
+#         pe = torch.zeros(seq_len,d_model)
+
+#         #crating a vector that will represent the position of the words inside the sentence
+#         #create a vector of shape (sequience length)
+#         position = torch.arange(0,seq_len,dtype=torch.float).unsqueeze(1)
+#         div_term = torch.exp(torch.arange(0,d_model,2).float() * (-math.log(10000.0) / d_model))
+#         # apply the sin to even postion and cosine to odd positions
+#         pe[:,0::2]=torch.sin(position * div_term)
+#         pe[:,1::2]=torch.cos(position * div_term)
+
+#         pe =pe.unsqueeze(1) #this will become tnesor of 1,seq_len,d_model
+
+#         self.register_buffer('pe', pe) #### when we want to save atnesor along with them mdoel we use this method
 
     
-    def forward(self, x):
-        x = x + (self.pe[:, :x.shape[1,:]]).requires_grad(False) ## we need to add positional encoding to every words inside the sentence require grad = flase make the model not learn the tensor
-        return self.dropout(x)
+#     def forward(self, x):
+#         x = x + (self.pe[:, :x.shape[1], :]).requires_grad_(False) # (batch, seq_len, d_model)
+#         return self.dropout(x)
+    #    x = x + (self.pe[:, :x.shape[1], :]).requires_grad_(False) # (batch, seq_len, d_model)
+        # 
+        # return self.dropout(x)
+         ## we need to add positional encoding to every words inside the sentence require grad = flase make the model not learn the tensor
+    #    return self.dropout(x)
     
     """
     Layer Normalisation: It normalizes the inputs to each sub-layer within the encoder and decoder stacks.
@@ -110,12 +140,13 @@ class FeedForwardBlock(nn.Module):
         super().__init__()
         self.linear_1 = nn.Linear(d_model,d_ff) #Matrix W1 and Bias B1
         self.dropout = nn.Dropout(dropout)
-        self.linear_2 = nn.Linear(d_model,d_ff) #Matrix W2 and Bias B2
+        self.linear_2 = nn.Linear(d_ff,d_model) #Matrix W2 and Bias B2
 
 
     def forward(self, x):
         #input sentence is a tensor here with dimensions (Batch,Seq_len,d_model) -> convert to another tnesor (Batch,seq_len, d_ff) --> Linear conver (batch,seqlen,d_ff)
         return self.linear_2(self.dropout(torch.relu(self.linear_1(x))))
+
     
 class MultiHeadAttentionBlock(nn.Module):
 
@@ -177,22 +208,39 @@ class MultiHeadAttentionBlock(nn.Module):
 
         # (batch,seqlen,d_model)-->(batch,seqlen,d_model)
         return self.w_o(x)
+
+class ResidualConnection(nn.Module):
     
-class ResidualConnetion(nn.Module):
+        def __init__(self, dropout: float) -> None:
+            super().__init__()
+            self.dropout = nn.Dropout(dropout)
+            self.norm = LayerNormalisation()
+    
+        def forward(self, x, sublayer):
+            return x + self.dropout(sublayer(self.norm(x)))
 
-    """
-    ResidualConnetion: This class represents the residual connection with layer normalization. It takes one argument: dropout for the dropout rate. 
-    The input tensor (x) is passed through the layer normalization, followed by the sublayer function (e.g., self-attention or feed-forward block), 
-    and finally, the output is added to the input tensor with dropout applied.
-    """
-
+class ResidualConnection(nn.Module):
     def __init__(self, dropout: float) -> None:
         super().__init__()
         self.dropout = nn.Dropout(dropout)
         self.norm = LayerNormalisation()
 
     def forward(self, x, sublayer):
-        return x + self.dropout(sublayer(self.norm(x))) 
+        return x + self.dropout(sublayer(self.norm(x)))
+
+# class ResidualConnetion(nn.Module):
+
+
+
+#     def __init__(self, dropout: float) -> None:
+#         super().__init__()
+#         self.dropout = nn.Dropout(dropout)
+#         self.norm = LayerNormalisation()
+
+#     def forward(self, x, sublayer):
+#         return x + self.dropout(sublayer(self.norm(x)))
+#         return x + self.dropout(sublayer(self.norm(x)))
+    
     
 class EncoderBlock(nn.Module):
 
@@ -202,21 +250,18 @@ class EncoderBlock(nn.Module):
     It initializes a list of residual connections with layer normalization (self.residual_connections). 
     In the forward pass, the input tensor (x) is passed through the self-attention block, followed by the feed-forward block, and then through the residual connections.
     """
-
-    def __init__(self, self_attention_block: MultiHeadAttentionBlock, feed_forward_block:FeedForwardBlock, dropout:float) -> None:
+    def __init__(self, self_attention_block: MultiHeadAttentionBlock, feed_forward_block: FeedForwardBlock, dropout: float) -> None:
         super().__init__()
         self.self_attention_block = self_attention_block
         self.feed_forward_block = feed_forward_block
-        self.residual_connections = nn.ModuleList([ResidualConnetion(dropout) for _ in range(2)])
-        
-    def forward(self,x, src_mask):
-
-        x = self.residual_connections[0](x, lambda x : self.self_attention_block(x ,x, x , src_mask))
+        self.residual_connections = nn.ModuleList([ResidualConnection(dropout) for _ in range(2)])
+            
+    def forward(self, x, src_mask):
+        x = self.residual_connections[0](x, lambda x: self.self_attention_block(x, x, x, src_mask))
         x = self.residual_connections[1](x, self.feed_forward_block)
+        return x   
+            
 
-        return x
-        
-    
 class Encoder(nn.Module):
 
     """
@@ -226,9 +271,11 @@ class Encoder(nn.Module):
     
     """
 
-
     def __init__(self, layers: nn.ModuleList) -> None:
         super().__init__()
+        self.layers = layers
+        self.norm = LayerNormalisation()
+
 
     def forward(self, x, mask):
         for layer in self.layers:
@@ -238,41 +285,56 @@ class Encoder(nn.Module):
     
 class DecoderBlock(nn.Module):
 
-    """
-    DecoderBlock:
-        This class represents a single block in the decoder of the Transformer model.
-        It takes the following parameters:
-            self_attention_block: An instance of the MultiHeadAttentionBlock class representing self-attention within the decoder.
-            cross_attention_block: An instance of the MultiHeadAttentionBlock class representing cross-attention between the decoder and encoder.
-            feed_forward_block: An instance of the FeedForwardBlock class representing the feed-forward neural network within the decoder.
-            dropout: A float representing the dropout rate.
-        The class initializes a list of residual connections with layer normalization (self.residual_connections).The forward method performs the forward pass through the decoder block. 
-        It takes the following inputs:
-            x: The input tensor to the decoder block.
-            encoder_output: The output tensor from the encoder.
-            src_mask: The mask for the source sequence.
-            tgt_mask: The mask for the target sequence.
-        Within the forward method, the input tensor x undergoes several operations:
-        The input tensor is passed through the self-attention block using the self_attention_block instance, which performs self-attention on the input tensor.
-        The resulting tensor is passed through the cross-attention block using the cross_attention_block instance, which performs cross-attention between the input tensor and the encoder output.
-        The output tensor from cross-attention is passed through the feed-forward block using the feed_forward_block instance, which applies a feed-forward neural network to the tensor.
-        The output tensor from the feed-forward block is returned as the result of the decoder block's forward pass.
-    
-    """
-
-    def __init__(self,self_attention_block:MultiHeadAttentionBlock, cross_attention_block: MultiHeadAttentionBlock, feed_forward_block: FeedForwardBlock, dropout: float) -> None:
+    def __init__(self, self_attention_block: MultiHeadAttentionBlock, cross_attention_block: MultiHeadAttentionBlock, feed_forward_block: FeedForwardBlock, dropout: float) -> None:
         super().__init__()
         self.self_attention_block = self_attention_block
         self.cross_attention_block = cross_attention_block
         self.feed_forward_block = feed_forward_block
-        self.residual_connections = nn.ModuleList([ResidualConnetion(dropout) for _ in range(3)])
+        self.residual_connections = nn.ModuleList([ResidualConnection(dropout) for _ in range(3)])
 
-    def forward(self,x, encoder_output, src_mask, tgt_mask):
-
-        x = self.residual_connections[0](x, lambda x: self.self_attention_block(x,x,x, tgt_mask))
-        x = self.residual_connections[1](x ,lambda x: self.cross_attention_block(x, encoder_output, encoder_output, src_mask))
-        x = self.residual_connections[2](x, lambda x: self.feed_forward_block)
+    def forward(self, x, encoder_output, src_mask, tgt_mask):
+        x = self.residual_connections[0](x, lambda x: self.self_attention_block(x, x, x, tgt_mask))
+        x = self.residual_connections[1](x, lambda x: self.cross_attention_block(x, encoder_output, encoder_output, src_mask))
+        x = self.residual_connections[2](x, self.feed_forward_block)
         return x
+# class DecoderBlock(nn.Module):
+
+#     """
+#     DecoderBlock:
+#         This class represents a single block in the decoder of the Transformer model.
+#         It takes the following parameters:
+#             self_attention_block: An instance of the MultiHeadAttentionBlock class representing self-attention within the decoder.
+#             cross_attention_block: An instance of the MultiHeadAttentionBlock class representing cross-attention between the decoder and encoder.
+#             feed_forward_block: An instance of the FeedForwardBlock class representing the feed-forward neural network within the decoder.
+#             dropout: A float representing the dropout rate.
+#         The class initializes a list of residual connections with layer normalization (self.residual_connections).The forward method performs the forward pass through the decoder block. 
+#         It takes the following inputs:
+#             x: The input tensor to the decoder block.
+#             encoder_output: The output tensor from the encoder.
+#             src_mask: The mask for the source sequence.
+#             tgt_mask: The mask for the target sequence.
+#         Within the forward method, the input tensor x undergoes several operations:
+#         The input tensor is passed through the self-attention block using the self_attention_block instance, which performs self-attention on the input tensor.
+#         The resulting tensor is passed through the cross-attention block using the cross_attention_block instance, which performs cross-attention between the input tensor and the encoder output.
+#         The output tensor from cross-attention is passed through the feed-forward block using the feed_forward_block instance, which applies a feed-forward neural network to the tensor.
+#         The output tensor from the feed-forward block is returned as the result of the decoder block's forward pass.
+    
+#     """
+
+#     def __init__(self,self_attention_block:MultiHeadAttentionBlock, cross_attention_block: MultiHeadAttentionBlock, feed_forward_block: FeedForwardBlock, dropout: float) -> None:
+#         super().__init__()
+#         self.self_attention_block = self_attention_block
+#         self.cross_attention_block = cross_attention_block
+#         self.feed_forward_block = feed_forward_block
+#         self.residual_connections = nn.ModuleList([ResidualConnection(dropout) for _ in range(3)])
+#         self.residual_connections = nn.ModuleList([ResidualConnection(dropout) for _ in range(3)])
+
+#     def forward(self,x, encoder_output, src_mask, tgt_mask):
+
+#         x = self.residual_connections[0](x, lambda x: self.self_attention_block(x,x,x, tgt_mask))
+#         x = self.residual_connections[1](x ,lambda x: self.cross_attention_block(x, encoder_output, encoder_output, src_mask))
+#         x = self.residual_connections[2](x, lambda x: self.feed_forward_block)
+#         return x
 
 class Decoder(nn.Module):
 
@@ -411,7 +473,7 @@ def build_transformer(src_vocab_size:int,tgt_vocab_size:int, src_seq_len:int, tg
         encoder_self_attention_block = MultiHeadAttentionBlock(d_model, h , dropout)
         feed_forwards_block = FeedForwardBlock(d_model, d_ff, dropout)
         encoder_block = EncoderBlock(encoder_self_attention_block, feed_forwards_block, dropout)
-        encoder_blocks.append(decoder_block)
+        encoder_blocks.append(encoder_block)
     
     #Create a Decoder Block
 
